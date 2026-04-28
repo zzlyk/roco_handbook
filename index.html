@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>精灵课题进度同步工具</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .done { text-decoration: line-through; color: #9ca3af; opacity: 0.6; }
+        .filter-btn-active {
+            background-color: #4f46e5 !important;
+            color: white !important;
+            border-color: #4f46e5 !important;
+            box-shadow: 0 4px 6px -1px rgba(79, 70, 229, 0.4);
+        }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen p-4 md:p-8">
+    <div id="app" class="max-w-4xl mx-auto">
+        <header class="mb-6 text-center">
+            <h1 class="text-3xl font-bold text-indigo-600">精灵课题进度同步</h1>
+            <p class="text-gray-400 text-sm mt-1">根据上传的 JSON 自动勾选/取消任务</p>
+        </header>
+
+        <div class="mb-6 p-4 bg-white rounded-xl shadow-sm border border-indigo-100 flex items-center justify-between">
+            <div class="flex-1">
+                <label class="block text-xs font-bold text-gray-500 mb-1 uppercase">上传 pokedex_tasks.json</label>
+                <input type="file" @change="handleFileUpload" accept=".json" class="text-sm text-slate-500 file:mr-4 file:py-1 file:px-3 file:rounded-md file:border-0 file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer"/>
+            </div>
+            <button @click="resetProgress" class="ml-4 px-3 py-1 text-xs text-red-500 hover:bg-red-50 rounded">重置本地数据</button>
+        </div>
+
+        <div class="mb-6 space-y-4">
+            <div class="flex flex-wrap gap-2">
+                <button @click="filters.incompleteOnly = !filters.incompleteOnly"
+                        :class="{'filter-btn-active': filters.incompleteOnly}"
+                        class="px-4 py-2 rounded-full bg-white border border-gray-300 text-sm transition-all shadow-sm">
+                    ⚠️ 隐藏已满进度 (非100%)
+                </button>
+
+                <button v-for="(label, taskName) in presetTasks" :key="taskName"
+                        @click="toggleTaskFilter(taskName)"
+                        :class="{'filter-btn-active': filters.targetTask === taskName}"
+                        class="px-4 py-2 rounded-full bg-white border border-gray-300 text-sm transition-all shadow-sm">
+                    🔍 未完: {{ taskName }}
+                </button>
+            </div>
+
+            <div class="relative">
+                <input v-model="searchQuery" type="text" placeholder="搜索宠物名字..."
+                       class="w-full p-3 pl-10 rounded-xl border border-gray-200 shadow-inner outline-none focus:ring-2 focus:ring-indigo-400">
+                <span class="absolute left-3 top-3.5 text-gray-400">🔍</span>
+            </div>
+        </div>
+
+        <div class="mb-4 flex justify-between items-center px-2">
+            <span class="text-sm text-gray-500">匹配结果: <span class="font-bold text-indigo-600">{{ filteredPets.length }}</span> 只精灵</span>
+            <button v-if="hasActiveFilters" @click="clearFilters" class="text-xs text-indigo-500 hover:underline">清除所有筛选</button>
+        </div>
+
+        <div class="space-y-3">
+            <div v-for="pet in filteredPets" :key="pet.id" class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                <div @click="togglePet(pet.id)" class="p-4 flex items-center justify-between cursor-pointer hover:bg-indigo-50">
+                    <div class="flex items-center space-x-3">
+                        <span class="text-xs font-mono text-gray-300">#{{ pet.id }}</span>
+                        <h2 class="text-lg font-bold text-gray-800">{{ pet.name }}</h2>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <span class="text-xs text-gray-400">{{ getDoneCount(pet) }}/{{ pet.pet_topic.length }}</span>
+                        <div class="w-24 h-2 bg-gray-100 rounded-full overflow-hidden">
+                            <div class="h-full bg-indigo-500" :style="{width: getCompletionRate(pet) + '%'}"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div v-show="activePet === pet.id" class="p-4 bg-slate-50 border-t border-gray-50">
+                    <div class="grid grid-cols-1 gap-2">
+                        <div v-for="topic in pet.pet_topic" :key="topic.topic_Id"
+                             class="flex items-center p-2 rounded bg-white border transition-all"
+                             :class="isDone(pet.id, topic.topic_Id) ? 'border-transparent opacity-50' : 'border-orange-100 bg-orange-50/30 shadow-sm'">
+                            <input type="checkbox"
+                                   :id="'t-'+pet.id+'-'+topic.topic_Id"
+                                   :checked="isDone(pet.id, topic.topic_Id)"
+                                   @change="manualToggle(pet.id, topic.topic_Id)"
+                                   class="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-400">
+                            <label :for="'t-'+pet.id+'-'+topic.topic_Id"
+                                   :class="{ 'done': isDone(pet.id, topic.topic_Id), 'font-bold text-orange-700': !isDone(pet.id, topic.topic_Id) && topic.topic_desc === filters.targetTask }"
+                                   class="ml-3 text-sm text-gray-700 cursor-pointer flex-1">
+                                {{ topic.topic_desc }}
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div v-if="filteredPets.length === 0" class="py-20 text-center bg-white rounded-xl border border-dashed text-gray-400">
+                没有找到符合条件的记录
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, computed, onMounted, watch } = Vue;
+
+        createApp({
+            setup() {
+                const pets = ref({});
+                const activePet = ref(null);
+                const searchQuery = ref('');
+                const completedMap = ref({});
+
+                const filters = ref({
+                    incompleteOnly: false,
+                    targetTask: ''
+                });
+
+                const presetTasks = {
+                    "捕捉1只精灵": "capture",
+                    "捕捉1只了不起天分的精灵": "talent",
+                    "获得「命定勇者」奖牌": "medal"
+                };
+
+                onMounted(async () => {
+                    const res = await fetch('PET_HANDBOOK.json');
+                    const data = await res.json();
+                    pets.value = data.RocoDataRows;
+                    const saved = localStorage.getItem('pet_progress_v5');
+                    if (saved) completedMap.value = JSON.parse(saved);
+                });
+
+                watch(completedMap, (val) => {
+                    localStorage.setItem('pet_progress_v5', JSON.stringify(val));
+                }, { deep: true });
+
+                const isDone = (petId, topicId) => {
+                    return completedMap.value[petId]?.includes(topicId) || false;
+                };
+
+                // 处理上传并应用新逻辑
+                const handleFileUpload = (event) => {
+                    const file = event.target.files[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        try {
+                            const uploadList = JSON.parse(e.target.result);
+                            const newMap = {};
+
+                            Object.values(pets.value).forEach(pet => {
+                                // 1. 在上传的 JSON 中查找当前宠物的所有记录
+                                const petRecords = uploadList.filter(item => item.pet_name === pet.name);
+
+                                // 逻辑：如果完全没有出现在上传的 JSON 中 -> 保持全不勾选 (newMap 不添加)
+                                if (petRecords.length === 0) return;
+
+                                // 逻辑：如果有任何一条记录是 all_check: 1 -> 标记全完成
+                                const hasAllCheck = petRecords.some(r => r.all_check === 1);
+
+                                if (hasAllCheck) {
+                                    newMap[pet.id] = pet.pet_topic.map(t => t.topic_Id);
+                                } else {
+                                    // 逻辑：处理 all_check: 0 的情况
+                                    // 找出 status=1 的具体任务描述（这些是未完成的）
+                                    const unfinishedTasks = petRecords
+                                        .filter(r => r.all_check === 0 && r.status === 1)
+                                        .map(r => r.task);
+
+                                    // 只有不在 unfinishedTasks 里的 topic 才会标记为已完成
+                                    const doneIds = pet.pet_topic
+                                        .filter(t => !unfinishedTasks.includes(t.topic_desc))
+                                        .map(t => t.topic_Id);
+
+                                    if (doneIds.length > 0) newMap[pet.id] = doneIds;
+                                }
+                            });
+
+                            completedMap.value = newMap;
+                            alert("同步成功！");
+                        } catch (err) {
+                            alert("文件格式有误，请确保是合规的 JSON 数组");
+                        }
+                    };
+                    reader.readAsText(file);
+                };
+
+                const filteredPets = computed(() => {
+                    let list = Object.values(pets.value);
+                    if (searchQuery.value.trim()) {
+                        list = list.filter(p => p.name.includes(searchQuery.value.trim()));
+                    }
+                    if (filters.value.incompleteOnly) {
+                        list = list.filter(p => getCompletionRate(p) < 100);
+                    }
+                    if (filters.value.targetTask) {
+                        const target = filters.value.targetTask;
+                        list = list.filter(p =>
+                            p.pet_topic.some(topic => topic.topic_desc === target && !isDone(p.id, topic.topic_Id))
+                        );
+                    }
+                    return list;
+                });
+
+                const toggleTaskFilter = (name) => {
+                    filters.value.targetTask = (filters.value.targetTask === name) ? '' : name;
+                };
+
+                const manualToggle = (petId, topicId) => {
+                    if (!completedMap.value[petId]) completedMap.value[petId] = [];
+                    const list = completedMap.value[petId];
+                    const idx = list.indexOf(topicId);
+                    idx > -1 ? list.splice(idx, 1) : list.push(topicId);
+                };
+
+                const getDoneCount = (pet) => completedMap.value[pet.id]?.length || 0;
+                const getCompletionRate = (pet) => {
+                    if (!pet.pet_topic || pet.pet_topic.length === 0) return 0;
+                    return Math.round((getDoneCount(pet) / pet.pet_topic.length) * 100);
+                };
+
+                return {
+                    filteredPets, activePet, searchQuery, filters, presetTasks,
+                    handleFileUpload, isDone, manualToggle, getCompletionRate, getDoneCount,
+                    toggleTaskFilter, clearFilters: () => { filters.value.incompleteOnly = false; filters.value.targetTask = ''; searchQuery.value = ''; },
+                    resetProgress: () => { completedMap.value = {}; },
+                    hasActiveFilters: computed(() => filters.value.incompleteOnly || filters.value.targetTask || searchQuery.value),
+                    togglePet: (id) => activePet.value = activePet.value === id ? null : id
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
